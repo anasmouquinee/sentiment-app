@@ -1,0 +1,7 @@
+# Outils de qualité statique et de test avancé (TP4)
+ruff==0.6.*
+mypy==1.11.*
+hypothesis==6.112.*
+pytest-cov==5.0.*
+pre-commit==3.*
+

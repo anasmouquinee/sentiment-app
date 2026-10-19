@@ -1,16 +1,38 @@
 name: CI
 on: [push, pull_request]
 jobs:
-  tp1:
+  tp1-tp4:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }          # tout l'historique : git shortlog compte les deux auteurs
       - uses: actions/setup-python@v5
         with: { python-version: "3.11" }
+
+      # TP1 — environnement de base
       - name: Environnement virtuel et dépendances
-        run: python -m venv .venv && . .venv/bin/activate && pip install pandas scikit-learn pytest
+        run: python -m venv .venv && . .venv/bin/activate && pip install -r requirements.txt
+
+      # Diagnostic de l'environnement (TP1)
       - name: Diagnostic
         run: . .venv/bin/activate && python scripts/check_setup.py
-      - name: Tests
-        run: . .venv/bin/activate && pytest -q
+
+      # TP3 — entraîner le modèle avant les tests API
+      - name: Entraîner le modèle
+        run: . .venv/bin/activate && python src/train.py
+
+      # TP4 — outils de qualité
+      - name: Outils de qualité (TP4)
+        run: . .venv/bin/activate && pip install -r requirements-dev.txt
+
+      # TP4 — ruff (lint)
+      - name: ruff
+        run: . .venv/bin/activate && ruff check .
+
+      # TP4 — mypy (typage)
+      - name: mypy
+        run: . .venv/bin/activate && mypy api
+
+      # TP3 + TP4 — tests complets avec couverture ≥ 95 %
+      - name: Tests et couverture
+        run: . .venv/bin/activate && pytest -q --cov=api --cov-report=term-missing --cov-fail-under=95
