@@ -60,7 +60,7 @@ def racine() -> dict[str, Any]:
 @app.get("/health", response_model=ReponseHealth, summary="Santé de l'API")
 def health(request: Request) -> ReponseHealth:
     """Vérifie que l'API et le modèle sont opérationnels."""
-    if not hasattr(request.app.state, "classifier"):
+    if not getattr(request.app.state, "classifier", None):
         raise HTTPException(status_code=503, detail="Modèle non chargé")
     return ReponseHealth(
         status="OK",
@@ -75,7 +75,7 @@ def predict(requete: RequetePredict, request: Request) -> ReponsePredict:
     - **text** : texte à analyser (1 à 2000 caractères, non vide après suppression des blancs)
     - Renvoie **label** (POSITIVE | NEGATIVE | INDETERMINE), **score** et le texte reçu.
     """
-    if not hasattr(request.app.state, "classifier"):
+    if not getattr(request.app.state, "classifier", None):
         raise HTTPException(status_code=503, detail="Modèle non chargé")
 
     classifier: SentimentClassifier = request.app.state.classifier

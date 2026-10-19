@@ -5,13 +5,13 @@ text,attendu,difficulte,erreur_connue
 "Livraison express, service client réactif, parfait",POSITIVE,,
 "Produit exactement comme décrit, je suis très satisfait",POSITIVE,,modèle demo insuffisant — vocabulaire limité
 "Super achat, je n'hésiterai pas à recommander",POSITIVE,négation,modèle TF-IDF sensible à la négation
-"Qualité décevante malgré le bon prix affiché",NEGATIVE,mitigé,
+"Qualité décevante malgré le bon prix affiché",NEGATIVE,mitigé,modèle TF-IDF dominé par les termes positifs
 "Arrivé cassé, bravo le transporteur — service déplorable",NEGATIVE,ironie,
 "Produit cassé dès la première utilisation, aucun remboursement",NEGATIVE,,
 "Service client injoignable, délai non respecté, à éviter",NEGATIVE,,
 "Pas terrible, je ne suis pas convaincu du tout",NEGATIVE,négation,
-"Très belle présentation mais fonctionnement médiocre",NEGATIVE,mitigé,
-"Emballage parfait, mais produit ne correspond pas à la description",NEGATIVE,mitigé,
+"Très belle présentation mais fonctionnement médiocre",NEGATIVE,mitigé,modèle TF-IDF dominé par les mots positifs du début
+"Emballage parfait, mais produit ne correspond pas à la description",NEGATIVE,mitigé,modèle TF-IDF dominé par les mots positifs du début
 "Je m'attendais à mieux pour ce prix, déçu",NEGATIVE,,
 "Ironie du sort : le produit 'premium' est moins bien que le bas de gamme",NEGATIVE,ironie,
 "Bon produit dans l'ensemble, quelques défauts mineurs tolérables",POSITIVE,mitigé,modèle TF-IDF dominé par les mots négatifs
