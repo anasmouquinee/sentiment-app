@@ -71,5 +71,5 @@ sentiment-app/
 
 | Rôle | Nom | Identifiant GitHub | Travail de la semaine 1 |
 | --- | --- | --- | --- |
-| Membre A | Anas Mouqine | @anasmouqine | Initialisation du projet et cadrage des cas 1 et 3 |
-| Membre B | Assia Nouaoury | @nouaoury | Cadrage du cas 2 et validation des tests |
+| Membre A | Assia Nouaoury | @nouaoury | Initialisation du projet et cadrage des cas 1 et 3 |
+| Membre B | Anas Mouqine | @anasmouqine | Cadrage du cas 2 et validation des tests |
