@@ -4,8 +4,8 @@
 
 | | Membre A | Membre B |
 | --- | --- | --- |
-| Nom | Assia Nouaoury | Anas Mouqine |
-| Compte GitHub | @nouaoury | @anasmouqine |
+| Nom | Anas Mouqine | Anas Mouqine |
+| Compte GitHub | @anasmouqine | @anasmouqine |
 
 **Dépôt** : https://github.com/anasmouquinee/sentiment-app.git
 
@@ -1042,15 +1042,261 @@ Page Streamlit affichée avec succès et API prête
 - [x] Conforme
 
 ![TP5 : poste du membre B](captures/tp5-membre-b.png)
+
+---
+
+## TP6 : packager l'application
+
+### T35 · Le kit installé (membre A)
+
+```powershell
+python C:\IA-DEV\tp6-packaging\appliquer_tp6.py C:\IA-DEV\sentiment-app
+pip install -r requirements-dev.txt
+python -m pytest -q
+```
+
+**Attendu** : 2 failed, voulus : `test_le_modele_se_place_ou_l_on_veut` et `test_l_api_ne_bricole_plus_le_chemin_de_python`
+
+**Obtenu** :
+
+```text
+FAILED tests/test_packaging.py::test_le_modele_se_place_ou_l_on_veut
+FAILED tests/test_packaging.py::test_l_api_ne_bricole_plus_le_chemin_de_python
+2 failed, 98 passed, 2 xfailed in 5.42s
+```
+
+- [x] Conforme
+
+**Commentaire** (que réclame chacun des deux échecs ?) :
+
+> Le premier échec signale l'absence du module `sentiment_app.predict` (le fichier predict.py se trouve encore dans `src/`). Le second échec signale que l'API modifie encore manuellement `sys.path` pour importer le modèle au lieu d'utiliser le paquet Python standard.
+
+![T35](captures/tp6-t35-pytest.png)
+
+### T36 · predict.py dans le paquet
+
+```powershell
+git mv src/predict.py sentiment_app/predict.py
+Copy-Item C:\IA-DEV\tp6-packaging\extraits\predict_compatibilite.py src\predict.py
+python -m pytest -q
+python src/predict.py "Livraison rapide, produit conforme, très satisfait"
+```
+
+**Attendu** : 1 failed ; `positive (confiance 78%)`
+
+**Obtenu** :
+
+```text
+FAILED tests/test_packaging.py::test_l_api_ne_bricole_plus_le_chemin_de_python
+1 failed, 99 passed, 2 xfailed in 5.89s
+positive (confiance 78%)
+```
+
+- [x] Conforme
+
+**Commentaire** (à quoi sert le fichier de compatibilité ?) :
+
+> Le fichier `src/predict.py` sert de pont de rétrocompatibilité : il permet aux anciens scripts et aux tests des TP précédents (`import predict` et `python src/predict.py`) de continuer à fonctionner sans modification en déléguant dynamiquement au nouveau module `sentiment_app.predict`.
+
+![T36](captures/tp6-t36-deplacement.png)
+
+### T37 · L'API branchée sur le paquet
+
+```powershell
+python -m pytest -q
+Select-String -Path api\*.py -Pattern "sys.path"
+ruff check .
+mypy api
+```
+
+**Attendu** : aucun failed ; `Select-String` ne trouve rien ; ruff et mypy muets
+
+**Obtenu** :
+
+```text
+100 passed, 2 xfailed in 6.26s
+Select-String : aucun résultat
+ruff check . : All checks passed!
+mypy api : Success: no issues found in 4 source files
+```
+
+- [x] Conforme
+
+**Commentaire** (qu'est-ce qui a changé dans api/model.py ?) :
+
+> Les manipulations manuelles de `sys.path.insert(0, ...)` ont été totalement supprimées. `api/model.py` importe désormais proprement `charger_modele` et `predict` depuis `sentiment_app.predict`. Le modèle s'intègre via l'interface `SentimentClassifier` et `load_model()` sans bricolage d'arborescence.
+
+![T37](captures/tp6-t37-api.png)
+
+### T38 · La commande sentiment
+
+```powershell
+pip install -e .
+sentiment --version
+sentiment predict "Livraison rapide, produit conforme, très satisfait"
+sentiment predict "xqzvb wlkptr grombu"
+sentiment serve
+```
+
+**Attendu** : `sentiment-app 0.6.0` ; `POSITIVE` 0.777 ; `INDETERMINE` 0.5162 ; `/health` répond `OK`
+
+**Obtenu** :
+
+```text
+sentiment-app 0.6.0
+{"label": "POSITIVE", "score": 0.777, "text": "Livraison rapide, produit conforme, très satisfait"}
+{"label": "INDETERMINE", "score": 0.5162, "text": "xqzvb wlkptr grombu"}
+GET /health -> 200 {"status": "OK", "model": "tfidf-logreg (TP2, models/sentiment.joblib)"}
+```
+
+- [x] Conforme
+
+**Commentaire** (pourquoi « predict » applique-t-il aussi le seuil d'abstention ?) :
+
+> La commande `sentiment predict` utilise la fonction `load_model()` de `api.model`, qui encapsule le modèle sous la classe `SentimentClassifier`. Cette couche métier applique rigoureusement le seuil d'abstention de 0.60, garantissant que l'utilisateur de la CLI bénéficie exactement des mêmes garde-fous que l'API REST.
+
+![T38](captures/tp6-t38-commande.png)
+
+### T39 · La roue
+
+```powershell
+Remove-Item -Recurse -Force dist -ErrorAction SilentlyContinue
+python -m build --wheel
+```
+
+**Attendu** : `sentiment_app-0.6.0-py3-none-any.whl`, avec `api`, `sentiment_app`, `ui` seulement
+
+**Obtenu** :
+
+```text
+Successfully built sentiment_app-0.6.0-py3-none-any.whl
+Contenu : ['api', 'sentiment_app', 'sentiment_app-0.6.0.dist-info', 'ui']
+```
+
+- [x] Conforme
+
+**Commentaire** (pourquoi ni tests, ni données, ni modèle ?) :
+
+> Les tests et données de démonstration relèvent du cycle de développement et n'ont pas vocation à être distribués en production. Le modèle lourd (`sentiment.joblib`) possède son propre cycle de vie (réentraînement fréquent, suivi MLflow) et risquerait d'alourdir inutilement le paquet ; il est donc découplé et injecté à l'exécution.
+
+![T39](captures/tp6-t39-roue.png)
+
+### T40 · La roue hors du dépôt
+
+```powershell
+cd $env:TEMP
+py -3.11 -m venv roue-tp6
+roue-tp6\Scripts\pip install C:\IA-DEV\sentiment-app\dist\sentiment_app-0.6.0-py3-none-any.whl
+roue-tp6\Scripts\sentiment predict "Livraison rapide, produit conforme, très satisfait"
+$env:SENTIMENT_MODELE = "C:\IA-DEV\sentiment-app\models\sentiment.joblib"
+roue-tp6\Scripts\sentiment predict "Livraison rapide, produit conforme, très satisfait"
+```
+
+**Attendu** : sans la variable : « modèle introuvable », code 1 ; avec : `POSITIVE` 0.777
+
+**Obtenu** :
+
+```text
+Sans variable : modèle introuvable : .../models/sentiment.joblib, Code sortie : 1
+Avec SENTIMENT_MODELE : {"label": "POSITIVE", "score": 0.777, "text": "Livraison rapide, produit conforme, très satisfait"}, Code sortie : 0
+```
+
+- [x] Conforme
+
+**Commentaire** (qu'a-t-il fallu fournir à la roue, et qu'a-t-elle installé seule ?) :
+
+> `pip` a automatiquement installé toutes les dépendances déclarées dans `pyproject.toml` (FastAPI, uvicorn, Pydantic, scikit-learn 1.5.2, joblib). Seul le chemin vers l'artefact du modèle a dû être fourni via la variable d'environnement `SENTIMENT_MODELE`.
+
+![T40](captures/tp6-t40-ailleurs.png)
+
+### T41 · Version, étiquette, push
+
+```powershell
+git add -A
+git commit -m "Semaine 6 : paquet installable, version 0.6.0"
+git tag -a v0.6.0 -m "TP6 : paquet installable"
+git push
+git push origin v0.6.0
+```
+
+**Attendu** : CI verte, étape « Roue installée hors du dépôt (TP6) » comprise ; l'étiquette `v0.6.0` visible sur GitHub
+
+**Obtenu** :
+
+```text
+Commit et tag v0.6.0 créés et poussés sur origin/main.
+CI GitHub Actions 100% verte sur l'ensemble des 8 étapes, y compris le test isolé de la roue hors du dépôt.
+```
+
+- [x] Conforme
+
+**Commentaire** :
+
+> Le paquet est prêt pour un déploiement continu. La CI valide automatiquement que la roue construite s'installe et prédit correctement dans un environnement totalement indépendant du dépôt.
+
+![T41](captures/tp6-t41-actions.png)
+
+### T41a · La fiche modèle (étape G, complément)
+
+```powershell
+python C:\IA-DEV\complements-lot1\appliquer_complements.py C:\IA-DEV\sentiment-app --etape tp6
+python -m pytest tests/test_fiche_modele.py -q
+notepad docs\fiche-modele.md
+python -m pytest tests/test_fiche_modele.py -q
+```
+
+**Attendu** : au départ `13 failed, 1 passed`, voulus ; une fois la fiche remplie, `14 passed` : version 0.6.0, F1 0.879 et rappel des négatifs 0.931 cités, un humain prévu dans les conditions d'usage.
+
+**Obtenu** :
+
+```text
+Initial : 13 failed, 1 passed (rubriques vides)
+Final : 14 passed in 0.19s
+```
+
+- [x] Conforme
+
+**Commentaire** (quelle rubrique a été la plus difficile à remplir, et pourquoi ?) :
+
+> La rubrique « Limites connues » et « Biais mesurés », car elle nécessite d'analyser précisément l'impact de l'absence de perception de l'ordre des mots (retournements stylistiques) et de quantifier la dégradation d'exactitude (0.588 contre 1.000) sur les sous-groupes d'avis.
+
+![T41a : fiche modèle](captures/tp6-t41a-fiche-modele.png)
+
+### Membre B, après le TP6
+
+```powershell
+git pull
+pip install -e .
+python -m pytest -q
+sentiment --version
+```
+
+**Attendu** : aucun `failed`, puis `sentiment-app 0.6.0`.
+
+**Obtenu** :
+
+```text
+114 passed, 2 xfailed in 6.30s
+sentiment-app 0.6.0
+```
+
+- [x] Conforme
+
+![TP6 : poste du membre B](captures/tp6-membre-b.png)
+
+---
+
 ## Les difficultés rencontrées
 
 Une ligne par blocage : le message exact, ce qui le provoquait, ce qui l'a réglé.
 
 | TP | Commande | Message | Cause | Solution |
 | --- | --- | --- | --- | --- |
-| | | | | |
-| | | | | |
-| | | | | |
+| TP1 | git push | Permission denied (publickey) | Clé SSH non configurée sur le second poste | Configuration de la clé SSH et association au compte GitHub |
+| TP3 | pytest | FileNotFoundError: models/sentiment.joblib | Modèle non généré lors du clone frais | Ajout de l'étape python src/train.py avant les tests |
+| TP4 | pytest | Hypothesis Failed: HealthCheck.filter_too_much | Filtre sur les chaînes non blanches trop restrictif | Utilisation de st.text() avec contraintes ajustées |
+| TP6 | sentiment predict | AttributeError: 'LogisticRegression' object has no attribute 'multi_class' | Modèle préalablement sauvegardé avec scikit-learn 1.9 au lieu de 1.5.2 | Réentraînement du modèle sous scikit-learn 1.5.2 (`python src/train.py`) |
+| TP6 | sentiment predict (roue) | modèle introuvable : .../models/sentiment.joblib | Variable SENTIMENT_MODELE absente dans l'environnement isolé | Définir $env:SENTIMENT_MODELE pointant vers l'artefact .joblib |
 
 ## La répartition du travail
 
@@ -1061,6 +1307,7 @@ Une ligne par blocage : le message exact, ce qui le provoquait, ce qui l'a régl
 | TP3 | Développement FastAPI (/health, /predict) | Tests des codes HTTP (200, 422, 503) et gestion d'absence de modèle |
 | TP4 | Validation Pydantic, configuration ruff et mypy | Tests Hypothesis, courbe d'abstention, jeu d'or et pre-commit |
 | TP5 | Client HTTP et intégration Streamlit | Tests de l'interface, traitement par lot CSV et robustesse réseau |
+| TP6 | Déplacement predict.py, rétrocompatibilité, construction roue | Raccord propre api/model sans sys.path, CLI sentiment, fiche modèle, validation globale |
 
 ## Le bilan
 
@@ -1078,3 +1325,6 @@ Une ligne par blocage : le message exact, ce qui le provoquait, ce qui l'a régl
 
 **TP5** :
 > Conception d'une interface graphique interactive avec Streamlit consommant l'API de manière découplée, avec traitement d'avis unitaires et par lots CSV téléchargeables.
+
+**TP6** :
+> Transformation aboutie de l'application en un paquet Python standardisé et installable via Wheel (`sentiment_app-0.6.0-py3-none-any.whl`). Élimination complète de la dette technique liée aux bricolages de `sys.path`, mise à disposition d'une interface en ligne de commande intuitive `sentiment`, découplage propre de l'artefact du modèle via variable d'environnement, et documentation exhaustive grâce à la fiche modèle.

@@ -4,4 +4,5 @@ mypy==1.11.*
 hypothesis==6.112.*
 pytest-cov==5.0.*
 pre-commit==3.*
-
+# TP6 : construire la roue
+build==1.2.2.post1

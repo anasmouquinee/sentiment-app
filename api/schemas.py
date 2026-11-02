@@ -1,8 +1,10 @@
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field, field_validator
+
+Label = Literal["POSITIVE", "NEGATIVE", "INDETERMINE"]
 
 
 class RequetePredict(BaseModel):
