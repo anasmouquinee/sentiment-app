@@ -1,4 +1,4 @@
-"""Le jeu d'or : vos avis, écrits à la main, vérifiés à chaque commit (TP4, étape C).
+"""Le jeu d'or : vos avis, écrits à la main, vérifiés à chaque commit (TP 1).
 
 Un avis échoue si l'API se trompe franchement (POSITIVE au lieu de NEGATIVE, ou
 l'inverse). Une abstention ne le fait pas échouer : elle est comptée par

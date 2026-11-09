@@ -1,87 +1,53 @@
 #!/usr/bin/env python
-"""Bilan du jeu d'or : réponses justes, abstentions, erreurs franches déclarées.
+"""Bilan du jeu d'or : ce que l'API répond à chacun de vos avis (TP 1).
 
-Usage :
+Usage, depuis la racine du dépôt, modèle entraîné :
   python src/bilan_jeu_or.py
+Les chiffres affichés vont dans docs/semaine4.md, partie 4.
 """
-from __future__ import annotations
-
+import csv
+import logging
 import sys
+from collections import Counter
 from pathlib import Path
 
-import pandas as pd
-from fastapi.testclient import TestClient
-
 RACINE = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(RACINE))
 JEU_OR = RACINE / "data" / "jeu_or.csv"
-SORTIE = RACINE / "docs" / "semaine4.md"
-MODELE = RACINE / "models" / "sentiment.joblib"
-
-
-def charger_jeu() -> pd.DataFrame:
-    if not JEU_OR.exists():
-        raise SystemExit(f"{JEU_OR} absent — créez data/jeu_or.csv")
-    df = pd.read_csv(JEU_OR)
-    if len(df) < 20:
-        raise SystemExit(f"Jeu d'or incomplet : {len(df)} avis sur 20 attendus")
-    return df
-
-
-def predire_tous(df: pd.DataFrame) -> pd.DataFrame:
-    if not MODELE.exists():
-        raise SystemExit("Modèle absent : lancez d'abord python src/train.py")
-
-    from api.main import app
-
-    resultats = []
-    with TestClient(app) as client:
-        for _, row in df.iterrows():
-            reponse = client.post("/predict", json={"text": row["text"]})
-            data = reponse.json()
-            resultats.append({
-                "text": row["text"],
-                "attendu": row["attendu"],
-                "obtenu": data["label"],
-                "score": data["score"],
-                "difficulte": row.get("difficulte", ""),
-                "erreur_connue": row.get("erreur_connue", ""),
-            })
-    return pd.DataFrame(resultats)
-
-
-def afficher_bilan(df: pd.DataFrame) -> None:
-    n = len(df)
-    abstentions = (df["obtenu"] == "INDETERMINE").sum()
-    erreurs_connues = df[df["erreur_connue"].notna() & (df["erreur_connue"] != "")]
-    repondus = df[df["obtenu"] != "INDETERMINE"]
-    justes = (repondus["obtenu"] == repondus["attendu"]).sum()
-    erreurs_franches = (repondus["obtenu"] != repondus["attendu"]).sum()
-    erreurs_inattendues = repondus[
-        (repondus["obtenu"] != repondus["attendu"])
-        & (repondus["erreur_connue"].isna() | (repondus["erreur_connue"] == ""))
-    ]
-
-    print(f"\n{'=' * 60}")
-    print(f"  Bilan du jeu d'or ({n} avis)")
-    print(f"{'=' * 60}")
-    print(f"  Réponses  : {len(repondus)} / {n}")
-    print(f"  Juste     : {justes}")
-    print(f"  Abstention: {abstentions}")
-    print(f"  Erreurs   : {erreurs_franches} total")
-    print(f"    dont connues  : {len(erreurs_connues)}")
-    print(f"    dont inattendu: {len(erreurs_inattendues)}")
-    if len(erreurs_inattendues) > 0:
-        print("\n  Erreurs inattendues :")
-        for _, row in erreurs_inattendues.iterrows():
-            print(f"    attendu={row['attendu']} obtenu={row['obtenu']} | {row['text'][:70]}")
-    print()
+FRANCHES = {"POSITIVE", "NEGATIVE"}
 
 
 def main() -> int:
-    df = charger_jeu()
-    resultats = predire_tous(df)
-    afficher_bilan(resultats)
+    sys.path.insert(0, str(RACINE))
+    from fastapi.testclient import TestClient
+
+    from api.main import app
+
+    logging.disable(logging.INFO)  # pas de journal (API, httpx) dans le bilan
+    with JEU_OR.open(encoding="utf-8", newline="") as f:
+        lignes = [ligne for ligne in csv.DictReader(f) if (ligne.get("text") or "").strip()]
+    if not lignes:
+        raise SystemExit("data/jeu_or.csv ne contient aucun avis : écrivez vos 20 avis d'abord")
+
+    bilan: Counter[str] = Counter()
+    with TestClient(app) as client:
+        for ligne in lignes:
+            reponse = client.post("/predict", json={"text": ligne["text"]})
+            corps = reponse.json()
+            label = corps.get("label") if reponse.status_code == 200 else f"refus {reponse.status_code}"
+            if label == ligne["attendu"]:
+                issue = "juste"
+            elif label in FRANCHES:
+                declaree = (ligne.get("erreur_connue") or "").strip()
+                issue = "erreur franche déclarée" if declaree else "erreur franche"
+            elif reponse.status_code == 200:
+                issue = "abstention"
+            else:
+                issue = label
+            bilan[issue] += 1
+            score = corps.get("score", 0.0) if reponse.status_code == 200 else 0.0
+            print(f"{issue:<24} {label!s:<12} {score:.2f}  attendu {ligne['attendu']:<9} {ligne['text'][:55]}")
+
+    print(f"\nBilan sur {len(lignes)} avis : " + ", ".join(f"{k} {v}" for k, v in sorted(bilan.items())))
     return 0
 
 

@@ -1,1 +1,1 @@
-"""Interface Streamlit du projet sentiment-app (TP5)."""
+"""Interface Streamlit du projet sentiment-app (TP 3)."""

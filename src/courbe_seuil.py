@@ -1,9 +1,17 @@
 #!/usr/bin/env python
-"""Mesure le compromis précision / renvoi vers humain selon le seuil d'abstention.
+"""Courbe du seuil d'abstention, mesurée sur le jeu de test du TP 1 (TP 2).
 
-Usage :
-  python src/courbe_seuil.py
+Le modèle ne répond que si sa confiance atteint le seuil ; sinon l'avis part vers
+un humain. Pour chaque seuil, on lit la part des avis auxquels il répond, et son
+exactitude sur ces seuls avis.
+
+Usage, depuis la racine du dépôt :
+  python src/courbe_seuil.py              # jeu de démonstration
+  python src/courbe_seuil.py --allocine   # jeu Allociné
+Le modèle doit avoir été entraîné sur les mêmes données que la courbe.
 """
+import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -11,37 +19,43 @@ import joblib
 from sklearn.model_selection import train_test_split
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from train import GRAINE, MODELE, charger
+from train import GRAINE, METRIQUES, MODELE, charger  # noqa: E402  (même découpage que train.py)
+
+SEUILS = [round(0.50 + 0.05 * i, 2) for i in range(10)]  # de 0,50 à 0,95
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--allocine", action="store_true", help="courbe sur le jeu Allociné")
+    args = parser.parse_args()
+
     if not MODELE.exists():
         raise SystemExit("Modèle absent : lancez d'abord python src/train.py")
+    df, source = charger(args.allocine)
+    if METRIQUES.exists():
+        entraine_sur = str(json.loads(METRIQUES.read_text(encoding="utf-8")).get("source", "?"))
+        if entraine_sur.lower()[:4] != str(source).lower()[:4]:
+            print(f"ATTENTION : modèle entraîné sur « {entraine_sur} », courbe calculée sur « {source} ».")
+            print("Réentraînez sur les mêmes données : sinon la courbe ne mesure pas votre modèle.\n")
 
-    pipeline = joblib.load(MODELE)
-    df, _ = charger(allocine=False)
+    # Même découpage que l'entraînement : seul le jeu de test, jamais vu par le modèle, est mesuré
     _, X_test, _, y_test = train_test_split(
         df["review"], df["label"], test_size=0.2, random_state=GRAINE, stratify=df["label"]
     )
+    pipeline = joblib.load(MODELE)
     probas = pipeline.predict_proba(X_test)
-    scores_max = probas.max(axis=1)
-    predictions = pipeline.predict(X_test)
+    confiance = probas.max(axis=1)
+    justes = pipeline.classes_[probas.argmax(axis=1)] == y_test.to_numpy()
     n = len(y_test)
 
-    print(f"{'seuil':>6}  {'répond à':>9}  {'part':>6}  {'exactitude':>10}  {'erreurs':>8}  {'vers un humain':>14}")
-    for seuil_int in range(50, 96, 5):
-        seuil = seuil_int / 100
-        masque = scores_max >= seuil
-        repond = masque.sum()
-        if repond == 0:
-            continue
-        exact = (predictions[masque] == list(y_test[masque])).mean()
-        erreurs = (predictions[masque] != list(y_test[masque])).sum()
-        vers_humain = n - repond
-        part = repond / n
-        print(
-            f"{seuil:>6.2f}  {repond:>9}  {part:>6.0%}  {exact:>10.3f}  {erreurs:>8}  {vers_humain:>14}"
-        )
+    print(f"Jeu de test : {n} avis ({source})\n")
+    print(f"{'seuil':>6} {'répond à':>9} {'part':>6} {'exactitude':>11} {'erreurs':>8} {'vers un humain':>15}")
+    for seuil in SEUILS:
+        repond = confiance >= seuil
+        k = int(repond.sum())
+        exactitude = f"{justes[repond].mean():.3f}" if k else "-"
+        erreurs = int((~justes[repond]).sum())
+        print(f"{seuil:>6.2f} {k:>9d} {k / n:>6.0%} {exactitude:>11} {erreurs:>8d} {n - k:>15d}")
     return 0
 
 

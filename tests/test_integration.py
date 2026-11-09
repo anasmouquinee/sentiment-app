@@ -1,131 +1,99 @@
-"""Tests d'intégration approfondis de l'API (TP4 — T26).
+"""Tests d'intégration : l'API telle qu'elle tourne vraiment (TP 2).
 
-Couvre :
-  - Démarrage réel avec TestClient (app en mémoire)
-  - Refus de démarrer si le modèle est absent (FileNotFoundError)
-  - 503 quand le modèle est retiré de app.state
-  - 500 quand le modèle plante (RuntimeError, ValueError)
-  - Rejet d'un modèle aux étiquettes inconnues
+Les tests de test_api.py vérifient des réponses ; ceux-ci vérifient le démarrage de l'API
+et son comportement quand le modèle manque ou tombe en panne.
 """
 from pathlib import Path
-from unittest.mock import MagicMock
 
 import pytest
-from fastapi.testclient import TestClient
 
 MODELE = Path(__file__).resolve().parents[1] / "models" / "sentiment.joblib"
-
-# ---------------------------------------------------------------------------
-# Fixture : client avec modèle réel
-# ---------------------------------------------------------------------------
+pytestmark = pytest.mark.skipif(not MODELE.exists(), reason="modèle non produit : python src/train.py")
 
 
-@pytest.fixture(scope="module")
-def client():
-    if not MODELE.exists():
-        pytest.skip("models/sentiment.joblib absent")
+@pytest.fixture
+def client_demarre():
+    from fastapi.testclient import TestClient
+
     from api.main import app
-    with TestClient(app) as c:
-        yield c
+
+    with TestClient(app) as client:
+        yield client
 
 
-# ---------------------------------------------------------------------------
-# T26-a : démarrage réel — le modèle se charge sans erreur
-# ---------------------------------------------------------------------------
+class ModeleEnPanne:
+    """Remplace le classifier : lève l'exception qu'on lui donne à chaque prédiction."""
+
+    model_name = "modèle en panne (test)"
+
+    def __init__(self, erreur: Exception) -> None:
+        self.erreur = erreur
+
+    def predict(self, text: str) -> dict:
+        raise self.erreur
 
 
-def test_demarrage_reel(client: TestClient):
-    """L'API démarre et /health répond 200."""
-    reponse = client.get("/health")
+def test_demarrage_reel_charge_le_modele():
+    """D.1 : un client ouvert par « with » exécute le lifespan."""
+    from fastapi.testclient import TestClient
+
+    from api.main import app
+
+    with TestClient(app) as client:
+        reponse = client.get("/health")
     assert reponse.status_code == 200
+    assert "sentiment.joblib" in reponse.json()["model"]
 
 
-# ---------------------------------------------------------------------------
-# T26-b : modèle absent → FileNotFoundError au démarrage
-# ---------------------------------------------------------------------------
+def test_modele_absent_l_api_refuse_de_demarrer(monkeypatch, tmp_path):
+    """Le contrôle manuel de /health du TP 1, devenu automatique."""
+    from fastapi.testclient import TestClient
 
-
-def test_refuse_sans_modele(monkeypatch, tmp_path):
-    """L'API lève FileNotFoundError si le modèle est absent."""
-    import api.model as model_module
-    # Rediriger le chemin vers un fichier inexistant
-    chemin_faux = tmp_path / "absent.joblib"
-    monkeypatch.setattr(model_module, "MODELE", chemin_faux)
-    model_module.charger_modele.cache_clear()
-
+    import predict as module_predict  # src/ est dans sys.path depuis l'import de api.model
     from api.main import app
-    with pytest.raises(FileNotFoundError):
+
+    monkeypatch.setattr(module_predict, "MODELE", tmp_path / "absent.joblib")
+    module_predict.charger_modele.cache_clear()  # sinon le modèle déjà chargé resterait en cache
+    try:
+        with pytest.raises(FileNotFoundError):
+            with TestClient(app):
+                pass
+    finally:
+        module_predict.charger_modele.cache_clear()
+
+
+def test_modele_non_charge_repond_503(client_demarre, monkeypatch):
+    """D.3 : l'API démarrée, le modèle retiré."""
+    from api.main import app
+
+    monkeypatch.setattr(app.state, "classifier", None)
+    assert client_demarre.get("/health").status_code == 503
+    assert client_demarre.post("/predict", json={"text": "Très bien"}).status_code == 503
+
+
+@pytest.mark.parametrize("erreur", [RuntimeError("bug interne"), ValueError("bug interne")],
+                         ids=["RuntimeError", "ValueError"])
+def test_modele_en_panne_repond_500(client_demarre, monkeypatch, erreur):
+    """D.4 : une panne du modèle est l'affaire du serveur (500), jamais du client (422)."""
+    from api.main import app
+
+    monkeypatch.setattr(app.state, "classifier", ModeleEnPanne(erreur))
+    reponse = client_demarre.post("/predict", json={"text": "Très bien"})
+    assert reponse.status_code == 500
+    assert "bug interne" not in reponse.text, "le message interne a fuité vers le client"
+
+
+def test_classes_inconnues_l_api_refuse_de_demarrer(monkeypatch):
+    """E.3 : un modèle réentraîné sur d'autres étiquettes est refusé au démarrage."""
+    from fastapi.testclient import TestClient
+
+    import api.model as module_api
+    from api.main import app
+
+    class ModeleEtranger:
+        classes_ = ["neg", "pos"]
+
+    monkeypatch.setattr(module_api, "charger_modele", lambda: ModeleEtranger())
+    with pytest.raises(ValueError, match="classes inconnues"):
         with TestClient(app):
             pass
-
-    # Restaurer le cache pour les autres tests
-    model_module.charger_modele.cache_clear()
-
-
-# ---------------------------------------------------------------------------
-# T26-c : modèle retiré de app.state → 503
-# ---------------------------------------------------------------------------
-
-
-def test_503_modele_retire(client: TestClient):
-    """Si le classifier est retiré de app.state, /predict renvoie 503."""
-    classifier_sauvegarde = client.app.state.classifier
-    del client.app.state.classifier
-    try:
-        reponse = client.post("/predict", json={"text": "Test"})
-        assert reponse.status_code == 503
-    finally:
-        client.app.state.classifier = classifier_sauvegarde
-
-
-# ---------------------------------------------------------------------------
-# T26-d : panne RuntimeError → 500 sans message interne
-# ---------------------------------------------------------------------------
-
-
-def test_500_runtime_error(client: TestClient):
-    """Une RuntimeError dans predict() renvoie 500, sans exposer le message."""
-    classifier_original = client.app.state.classifier
-    mock_classifier = MagicMock()
-    mock_classifier.predict.side_effect = RuntimeError("panne interne secrète")
-    client.app.state.classifier = mock_classifier
-    try:
-        reponse = client.post("/predict", json={"text": "Test"})
-        assert reponse.status_code == 500
-        # Le message interne ne doit PAS apparaître dans la réponse
-        assert "panne interne secrète" not in reponse.text
-    finally:
-        client.app.state.classifier = classifier_original
-
-
-# ---------------------------------------------------------------------------
-# T26-e : modèle aux étiquettes inconnues → RuntimeError au chargement
-# ---------------------------------------------------------------------------
-
-
-def test_etiquettes_inconnues(monkeypatch, tmp_path):
-    """Un modèle renvoyant des étiquettes inconnues lève RuntimeError."""
-    import joblib
-    from sklearn.feature_extraction.text import TfidfVectorizer
-    from sklearn.linear_model import LogisticRegression
-    from sklearn.pipeline import Pipeline
-
-    import api.model as model_module
-
-    # Entraîner un vrai mini-pipeline avec des étiquettes inconnues (bon/mauvais)
-    pipeline = Pipeline([
-        ("tfidf", TfidfVectorizer()),
-        ("clf", LogisticRegression()),
-    ])
-    pipeline.fit(["bien", "mal", "super", "nul"], ["bon", "mauvais", "bon", "mauvais"])
-
-    chemin_faux = tmp_path / "faux.joblib"
-    joblib.dump(pipeline, chemin_faux)
-
-    monkeypatch.setattr(model_module, "MODELE", chemin_faux)
-    model_module.charger_modele.cache_clear()
-
-    with pytest.raises(RuntimeError, match="Étiquettes inconnues"):
-        model_module.charger_modele()
-
-    model_module.charger_modele.cache_clear()
